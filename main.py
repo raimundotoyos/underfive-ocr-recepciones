@@ -75,34 +75,92 @@ def hash_image(pil_img):
     return hashlib.sha256(buf.getvalue()).hexdigest()
 
 def get_images_from_message(svc, user_id, msg):
+    """Descarga imágenes adjuntas o inline y loguea lo que encuentra."""
     out = []
     payload = msg.get("payload", {})
 
-    def dig(part):
+    def dig(part, depth=0):
         mime = part.get("mimeType","")
         filename = part.get("filename","")
         body = part.get("body",{})
+        print(f"[PART] depth={depth} mime={mime} filename={filename} "
+              f"attachId={body.get('attachmentId') is not None} hasData={'data' in body}")
 
-        if (filename and mime.startswith("image/")) or (mime.startswith("image/") and body.get("data")):
+        # imágenes adjuntas o inline embebidas
+        if mime.startswith("image/"):
+            data = None
             if body.get("attachmentId"):
                 att = svc.users().messages().attachments().get(
                     userId=user_id, messageId=msg["id"], id=body["attachmentId"]
                 ).execute()
                 data = base64.urlsafe_b64decode(att["data"])
-            else:
+            elif body.get("data"):
                 data = base64.urlsafe_b64decode(body["data"])
-            try:
-                pil = Image.open(io.BytesIO(data)).convert("RGB")
-                origin = "attachment" if filename else "inline"
-                out.append((origin, pil))
-            except Exception:
-                pass
+
+            if data:
+                try:
+                    pil = Image.open(io.BytesIO(data)).convert("RGB")
+                    origin = "attachment" if filename else "inline"
+                    out.append((origin, pil))
+                    print(f"[IMG] añadido origin={origin}, size={pil.size}")
+                except Exception as e:
+                    print(f"[WARN] no pude abrir imagen: {e}")
 
         for p in part.get("parts",[]):
-            dig(p)
+            dig(p, depth+1)
 
     dig(payload)
+    print(f"[INFO] total imágenes recolectadas: {len(out)}")
     return out
+
+
+def main():
+    creds = load_creds()
+    svc = gmail_service(creds)
+    ws = sheets_client(creds)
+
+    msgs = fetch_messages(svc)
+    print(f"[INFO] Mensajes que calzan con la query: {len(msgs)}")
+    if not msgs:
+        print("No hay correos que coincidan con la query.")
+        return
+
+    existing = read_existing(ws)
+    print(f"[INFO] Filas existentes en Sheet: {len(existing)}")
+
+    rows = []
+    for m in msgs:
+        msg = svc.users().messages().get(userId="me", id=m["id"]).execute()
+        headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
+        message_id = msg.get("id","")
+        fecha = parse_gmail_date(headers.get("date"))
+
+        images = get_images_from_message(svc, "me", msg)
+        print(f"[INFO] Mensaje {message_id}: imágenes encontradas = {len(images)}")
+
+        for origin, pil in images:
+            pre = preprocess(pil)
+            items = parse_table(pre)
+            print(f"[OCR] {origin}: filas detectadas = {len(items)}")
+            if not items:
+                sample = pytesseract.image_to_string(pre, lang="eng")[:400]
+                print("[DEBUG] OCR sample >>>")
+                print(sample)
+                print("<<< OCR sample end")
+
+            img_hash = hash_image(pre)
+            for it in items:
+                key = (message_id, str(it["sku"]), str(it["un_recibidas"]))
+                if key in existing:
+                    continue
+                rows.append([fecha, str(it["sku"]), str(it["un_recibidas"]), message_id, img_hash, origin])
+
+    if rows:
+        ws.append_rows(rows, value_input_option="RAW")
+        print(f"✅ Agregadas {len(rows)} filas nuevas.")
+    else:
+        print("No hay filas nuevas para agregar.")
+
 
 def fetch_messages(svc, user_id="me"):
     res = svc.users().messages().list(userId=user_id, q=GMAIL_QUERY, maxResults=20).execute()
@@ -126,49 +184,6 @@ def parse_gmail_date(date_str):
         return ts.tz_convert("America/Santiago").strftime("%Y-%m-%d %H:%M:%S")
     except Exception:
         return datetime.now(tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
-
-def main():
-    creds = load_creds()
-    svc = gmail_service(creds)
-    ws = sheets_client(creds)
-
-    msgs = fetch_messages(svc)
-    print(f"[INFO] Mensajes que calzan con la query: {len(msgs)}")
-    if not msgs:
-        print("No hay correos que coincidan con la query.")
-        return
-
-    existing = read_existing(ws)
-    print(f"[INFO] Filas existentes en Sheet: {len(existing)}")
-
-    rows = []
-    for m in msgs:
-        msg = svc.users().messages().get(userId="me", id=m["id"]).execute()
-        headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
-        message_id = msg.get("id","")
-        fecha = parse_gmail_date(headers.get("date"))
-        images = get_images_from_message(svc, "me", msg)
-        print(f"[INFO] Mensaje {message_id}: imágenes encontradas = {len(images)}")
-
-        for origin, pil in images:
-            pre = preprocess(pil)
-            items = parse_table(pre)
-            print(f"[INFO]   → {origin}: filas OCR detectadas = {len(items)}")
-            if not items:
-                # Muestra una muestra del OCR crudo para diagnosticar
-                sample = pytesseract.image_to_string(pre, lang="eng")[:400]
-                print("[DEBUG] OCR sample:\n" + sample)
-
-            img_hash = hash_image(pre)
-            for it in items:
-                key = (message_id, str(it["sku"]), str(it["un_recibidas"]))
-                if key in existing:
-                    continue
-                rows.append([fecha, str(it["sku"]), str(it["un_recibidas"]), message_id, img_hash, origin])
-
-    if rows:
-        ws.append_rows(rows, value_input_option="RAW")
-        print(f"✅ Agregadas {len(rows)} filas nuevas.")
-    else:
-        print("No hay filas nuevas para agregar.")
+if __name__ == "__main__":
+    main()
 
