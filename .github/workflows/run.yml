@@ -39,4 +39,7 @@ jobs:
           pip install -r requirements.txt
 
       - name: Run (unbuffered)
+        env:
+          PYTHONUNBUFFERED: "1"
         run: python -u main.py
+
