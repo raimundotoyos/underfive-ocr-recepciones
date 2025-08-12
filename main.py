@@ -26,6 +26,11 @@ print("[BOOT] main.py v3 arrancando...")
 # ───────────────────────────────────────────────────────────────────────────────
 # Auth / Services
 # ───────────────────────────────────────────────────────────────────────────────
+def normalize_spreadsheet_id(val: str) -> str:
+    val = (val or "").strip()
+    m = re.search(r"/d/([a-zA-Z0-9-_]+)", val)
+    return m.group(1) if m else val
+
 def load_creds():
     token_info = json.loads(os.environ["GOOGLE_TOKEN"])
     return Credentials.from_authorized_user_info(token_info, scopes=SCOPES)
