@@ -20,7 +20,7 @@ SCOPES = [
 GMAIL_QUERY = os.environ["GMAIL_QUERY"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 
-print("[BOOT] main.py v4 arrancando...")
+print("[BOOT] main.py v5 arrancando... [MARK]=UF-8421")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -51,7 +51,6 @@ def sheets_client(creds):
     tabs = [ws.title for ws in sh.worksheets()]
     print(f"[SHEET] Pestañas disponibles: {tabs}")
 
-    # Acepta ambos nombres (con y sin la p extra)
     preferred = "OCR Recepciones"
     alt = "OCR Recepeciones"  # con 'p' extra
     target = preferred if preferred in tabs else (alt if alt in tabs else preferred)
@@ -68,7 +67,6 @@ def sheets_client(creds):
 # OCR utils
 # ───────────────────────────────────────────────────────────────────────────────
 def preprocess(pil_img: Image.Image) -> Image.Image:
-    # Subir escala y binarizar para mejorar OCR en imágenes pequeñas
     img = np.array(pil_img.convert("L"))
     img = cv2.resize(img, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
     img = cv2.medianBlur(img, 3)
@@ -99,11 +97,10 @@ def parse_table(pil_img):
     Heurística:
     - SKU = 10–16 dígitos
     - UN RECIBIDAS = último entero de la línea
-    1º intenta con image_to_data; si no encuentra, fallback a image_to_string línea por línea.
+    Primero con image_to_data; si no encuentra, fallback a image_to_string por líneas.
     """
     out = []
 
-    # Método 1: usando filas de image_to_data
     rows = ocr_rows(pil_img)
     for g, text in rows:
         m_sku = re.search(r"(\d{10,16})", text.replace(" ", ""))
@@ -119,7 +116,6 @@ def parse_table(pil_img):
     if out:
         return out
 
-    # Método 2 (fallback): parseo línea por línea
     raw = pytesseract.image_to_string(pil_img, lang="eng")
     for line in raw.splitlines():
         line = line.strip()
@@ -146,7 +142,6 @@ def hash_image(pil_img):
 # Gmail helpers
 # ───────────────────────────────────────────────────────────────────────────────
 def get_images_from_message(svc, user_id, msg):
-    """Descarga imágenes adjuntas o inline y loguea lo que encuentra."""
     out = []
     payload = msg.get("payload", {})
 
@@ -219,7 +214,6 @@ def main():
     creds = load_creds()
     svc = gmail_service(creds)
 
-    # Muestra con qué cuenta estás autenticado
     profile = svc.users().getProfile(userId="me").execute()
     print(f"[AUTH] Gmail como: {profile.get('emailAddress')}")
 
@@ -250,9 +244,7 @@ def main():
             print(f"[OCR] {origin}: filas detectadas = {len(items)}")
             if not items:
                 sample = pytesseract.image_to_string(pre, lang="eng")[:400]
-                print("[DEBUG] OCR sample >>>")
-                print(sample)
-                print("<<< OCR sample end")
+                print("[DEBUG] OCR sample >>>"); print(sample); print("<<< OCR sample end")
 
             img_hash = hash_image(pre)
             for it in items:
