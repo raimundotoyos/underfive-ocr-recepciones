@@ -9,14 +9,23 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 import gspread
 
+# ───────────────────────────────────────────────────────────────────────────────
+# Config
+# ───────────────────────────────────────────────────────────────────────────────
 SCOPES = [
     "https://www.googleapis.com/auth/gmail.readonly",
-    "https://www.googleapis.com/auth/spreadsheets"
+    "https://www.googleapis.com/auth/spreadsheets",
 ]
 
 GMAIL_QUERY = os.environ["GMAIL_QUERY"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 
+# Mensaje de arranque para verificar que corre la última versión
+print("[BOOT] main.py v3 arrancando...")
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Auth / Services
+# ───────────────────────────────────────────────────────────────────────────────
 def load_creds():
     token_info = json.loads(os.environ["GOOGLE_TOKEN"])
     return Credentials.from_authorized_user_info(token_info, scopes=SCOPES)
@@ -34,6 +43,9 @@ def sheets_client(creds):
         ws.append_row(["fecha_correo","sku","un_recibidas","message_id","img_hash","origen"])
     return ws
 
+# ───────────────────────────────────────────────────────────────────────────────
+# OCR utils
+# ───────────────────────────────────────────────────────────────────────────────
 def preprocess(pil_img: Image.Image) -> Image.Image:
     img = np.array(pil_img.convert("L"))
     img = cv2.resize(img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
@@ -44,7 +56,8 @@ def preprocess(pil_img: Image.Image) -> Image.Image:
 def ocr_rows(pil_img):
     df = pytesseract.image_to_data(pil_img, lang="eng", output_type=pytesseract.Output.DATAFRAME)
     df = df.dropna(subset=["text"])
-    if df.empty: return []
+    if df.empty:
+        return []
     df["text"] = df["text"].astype(str).str.strip()
     df = df[df["text"] != ""]
     rows = []
@@ -74,6 +87,9 @@ def hash_image(pil_img):
     pil_img.save(buf, format="PNG")
     return hashlib.sha256(buf.getvalue()).hexdigest()
 
+# ───────────────────────────────────────────────────────────────────────────────
+# Gmail helpers
+# ───────────────────────────────────────────────────────────────────────────────
 def get_images_from_message(svc, user_id, msg):
     """Descarga imágenes adjuntas o inline y loguea lo que encuentra."""
     out = []
@@ -83,7 +99,9 @@ def get_images_from_message(svc, user_id, msg):
         mime = part.get("mimeType","")
         filename = part.get("filename","")
         body = part.get("body",{})
-        print(f"[PART] depth={depth} mime={mime} filename={filename} "
+        headers = {h["name"].lower(): h["value"] for h in part.get("headers", [])} if part.get("headers") else {}
+        cid = headers.get("content-id", "")
+        print(f"[PART] depth={depth} mime={mime} filename={filename} cid={cid} "
               f"attachId={body.get('attachmentId') is not None} hasData={'data' in body}")
 
         # imágenes adjuntas o inline embebidas
@@ -113,8 +131,37 @@ def get_images_from_message(svc, user_id, msg):
     print(f"[INFO] total imágenes recolectadas: {len(out)}")
     return out
 
+def fetch_messages(svc, user_id="me"):
+    res = svc.users().messages().list(userId=user_id, q=GMAIL_QUERY, maxResults=20).execute()
+    return res.get("messages", [])
 
+def read_existing(ws):
+    values = ws.get_all_values()
+    if not values:
+        return set()
+    header = values[0]
+    idx = {h:i for i,h in enumerate(header)}
+    existing = set()
+    for r in values[1:]:
+        if len(r) < len(header):
+            continue
+        existing.add((r[idx["message_id"]], r[idx["sku"]], r[idx["un_recibidas"]]))
+    return existing
+
+def parse_gmail_date(date_str):
+    try:
+        ts = pd.to_datetime(date_str, utc=True, errors="coerce")
+        if pd.isna(ts):
+            raise ValueError
+        return ts.tz_convert("America/Santiago").strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return datetime.now(tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+# ───────────────────────────────────────────────────────────────────────────────
+# Main
+# ───────────────────────────────────────────────────────────────────────────────
 def main():
+    print("[INFO] Entrando a main()")
     creds = load_creds()
     svc = gmail_service(creds)
     ws = sheets_client(creds)
@@ -161,29 +208,5 @@ def main():
     else:
         print("No hay filas nuevas para agregar.")
 
-
-def fetch_messages(svc, user_id="me"):
-    res = svc.users().messages().list(userId=user_id, q=GMAIL_QUERY, maxResults=20).execute()
-    return res.get("messages", [])
-
-def read_existing(ws):
-    values = ws.get_all_values()
-    if not values: return set()
-    header = values[0]
-    idx = {h:i for i,h in enumerate(header)}
-    existing = set()
-    for r in values[1:]:
-        if len(r) < len(header): continue
-        existing.add((r[idx["message_id"]], r[idx["sku"]], r[idx["un_recibidas"]]))
-    return existing
-
-def parse_gmail_date(date_str):
-    try:
-        ts = pd.to_datetime(date_str, utc=True, errors="coerce")
-        if pd.isna(ts): raise ValueError
-        return ts.tz_convert("America/Santiago").strftime("%Y-%m-%d %H:%M:%S")
-    except Exception:
-        return datetime.now(tz=timezone.utc).astimezone().strftime("%Y-%m-%d %H:%M:%S")
 if __name__ == "__main__":
     main()
-
