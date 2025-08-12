@@ -36,6 +36,7 @@ def gmail_service(creds):
 def sheets_client(creds):
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SPREADSHEET_ID)
+    print(f"[SHEET] Abierto: {sh.title}")
     try:
         ws = sh.worksheet("OCR Recepciones")
     except gspread.WorksheetNotFound:
@@ -47,18 +48,17 @@ def sheets_client(creds):
 # OCR utils
 # ───────────────────────────────────────────────────────────────────────────────
 def preprocess(pil_img: Image.Image) -> Image.Image:
+    # subir más la escala para imágenes chicas y binarizar mejor
     img = np.array(pil_img.convert("L"))
-    # subir más la resolución para imágenes pequeñas
     img = cv2.resize(img, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
     img = cv2.medianBlur(img, 3)
-    # binarización adaptativa + Otsu como fallback
     try:
-        img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                                    cv2.THRESH_BINARY, 31, 5)
+        img = cv2.adaptiveThreshold(
+            img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 31, 5
+        )
     except Exception:
         _, img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return Image.fromarray(img)
-
 
 def ocr_rows(pil_img):
     df = pytesseract.image_to_data(pil_img, lang="eng", output_type=pytesseract.Output.DATAFRAME)
@@ -79,8 +79,7 @@ def parse_table(pil_img):
     Heurística:
     - SKU = 10–16 dígitos
     - UN RECIBIDAS = último entero de la línea
-    Primero intentamos con image_to_data (filas confiables). Si no encuentra, fallback
-    a image_to_string por líneas.
+    1º intenta con image_to_data; si no encuentra, fallback a image_to_string línea por línea.
     """
     out = []
 
@@ -100,7 +99,7 @@ def parse_table(pil_img):
     if out:
         return out
 
-    # --- Método 2 (fallback): parseo línea por línea desde image_to_string ---
+    # --- Método 2 (fallback): parseo línea por línea ---
     raw = pytesseract.image_to_string(pil_img, lang="eng")
     for line in raw.splitlines():
         line = line.strip()
@@ -117,7 +116,6 @@ def parse_table(pil_img):
         out.append({"sku": sku, "un_recibidas": un_recibidas})
 
     return out
-
 
 def hash_image(pil_img):
     buf = io.BytesIO()
@@ -141,7 +139,6 @@ def get_images_from_message(svc, user_id, msg):
         print(f"[PART] depth={depth} mime={mime} filename={filename} cid={cid} "
               f"attachId={body.get('attachmentId') is not None} hasData={'data' in body}")
 
-        # imágenes adjuntas o inline embebidas
         if mime.startswith("image/"):
             data = None
             if body.get("attachmentId"):
@@ -238,6 +235,10 @@ def main():
                 if key in existing:
                     continue
                 rows.append([fecha, str(it["sku"]), str(it["un_recibidas"]), message_id, img_hash, origin])
+
+    print(f"[INFO] Total filas a agregar: {len(rows)}")
+    for r in rows:
+        print("[ROW]", r)
 
     if rows:
         ws.append_rows(rows, value_input_option="RAW")
