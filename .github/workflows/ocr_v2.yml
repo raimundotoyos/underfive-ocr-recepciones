@@ -1,0 +1,48 @@
+name: OCR Recepciones (v2)
+
+on:
+  schedule:
+    - cron: "15 12 * * *"   # 12:15 UTC (~08:15 CL aprox)
+  workflow_dispatch:
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    env:
+      GMAIL_QUERY: ${{ secrets.GMAIL_QUERY }}
+      SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+      GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
+      GOOGLE_TOKEN: ${{ secrets.GOOGLE_TOKEN }}
+      PYTHONUNBUFFERED: "1"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install system deps (tesseract)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y tesseract-ocr
+
+      - name: Write credentials to files
+        run: |
+          printf "%s" "${GOOGLE_CREDENTIALS}" > credentials.json
+          printf "%s" "${GOOGLE_TOKEN}" > token.json
+
+      - name: Install Python deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Show main.py (first/last lines)
+        run: |
+          echo "Commit SHA: $GITHUB_SHA"
+          echo "--- FIRST 40 LINES ---"; head -n 40 main.py || true
+          echo "--- LAST 30 LINES ---"; tail -n 30 main.py || true
+
+      - name: Run (unbuffered)
+        run: python -u main.py
