@@ -2,7 +2,7 @@ name: OCR Recepciones diario
 
 on:
   schedule:
-    - cron: "15 12 * * *"   # 12:15 UTC diario (~08:15 Chile aprox)
+    - cron: "15 12 * * *"   # 12:15 UTC (~08:15 CL aprox)
   workflow_dispatch:
 
 jobs:
@@ -37,8 +37,7 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-    - name: Run (unbuffered)
-  env:
-    PYTHONUNBUFFERED: "1"
-  run: python -u main.py
-
+      - name: Run (unbuffered)
+        env:
+          PYTHONUNBUFFERED: "1"
+        run: python -u main.py
