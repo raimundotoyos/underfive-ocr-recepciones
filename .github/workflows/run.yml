@@ -38,8 +38,13 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
-      - name: Run (unbuffered)
-        env:
-          PYTHONUNBUFFERED: "1"
-        run: python -u main.py
+      - name: Show main.py (first/last lines)
+        run: |
+          echo "Commit SHA: $GITHUB_SHA"
+          echo "--- FIRST 40 LINES ---"
+          head -n 40 main.py || true
+          echo "--- LAST 30 LINES ---"
+          tail -n 30 main.py || true
 
+      - name: Run (unbuffered)
+        run: python -u main.py
