@@ -20,17 +20,20 @@ SCOPES = [
 GMAIL_QUERY = os.environ["GMAIL_QUERY"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 
-# Mensaje de arranque para verificar que corre la última versión
 print("[BOOT] main.py v3 arrancando...")
 
 # ───────────────────────────────────────────────────────────────────────────────
-# Auth / Services
+# Helpers
 # ───────────────────────────────────────────────────────────────────────────────
 def normalize_spreadsheet_id(val: str) -> str:
+    """Acepta ID puro o URL completa y devuelve solo el ID."""
     val = (val or "").strip()
     m = re.search(r"/d/([a-zA-Z0-9-_]+)", val)
     return m.group(1) if m else val
 
+# ───────────────────────────────────────────────────────────────────────────────
+# Auth / Services
+# ───────────────────────────────────────────────────────────────────────────────
 def load_creds():
     token_info = json.loads(os.environ["GOOGLE_TOKEN"])
     return Credentials.from_authorized_user_info(token_info, scopes=SCOPES)
@@ -40,7 +43,9 @@ def gmail_service(creds):
 
 def sheets_client(creds):
     gc = gspread.authorize(creds)
-    sh = gc.open_by_key(SPREADSHEET_ID)
+    sid = normalize_spreadsheet_id(SPREADSHEET_ID)
+    print(f"[SHEET] Using ID: {sid}")
+    sh = gc.open_by_key(sid)
     print(f"[SHEET] Abierto: {sh.title}")
     try:
         ws = sh.worksheet("OCR Recepciones")
@@ -53,7 +58,7 @@ def sheets_client(creds):
 # OCR utils
 # ───────────────────────────────────────────────────────────────────────────────
 def preprocess(pil_img: Image.Image) -> Image.Image:
-    # subir más la escala para imágenes chicas y binarizar mejor
+    # Subir escala y binarizar para mejorar OCR en imágenes pequeñas
     img = np.array(pil_img.convert("L"))
     img = cv2.resize(img, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
     img = cv2.medianBlur(img, 3)
@@ -88,7 +93,7 @@ def parse_table(pil_img):
     """
     out = []
 
-    # --- Método 1: usando filas de image_to_data ---
+    # Método 1: usando filas de image_to_data
     rows = ocr_rows(pil_img)
     for g, text in rows:
         m_sku = re.search(r"(\d{10,16})", text.replace(" ", ""))
@@ -104,7 +109,7 @@ def parse_table(pil_img):
     if out:
         return out
 
-    # --- Método 2 (fallback): parseo línea por línea ---
+    # Método 2 (fallback): parseo línea por línea
     raw = pytesseract.image_to_string(pil_img, lang="eng")
     for line in raw.splitlines():
         line = line.strip()
@@ -203,6 +208,11 @@ def main():
     print("[INFO] Entrando a main()")
     creds = load_creds()
     svc = gmail_service(creds)
+
+    # Muestra con qué cuenta estás autenticado (para permisos del Sheet)
+    profile = svc.users().getProfile(userId="me").execute()
+    print(f"[AUTH] Gmail como: {profile.get('emailAddress')}")
+
     ws = sheets_client(creds)
 
     msgs = fetch_messages(svc)
