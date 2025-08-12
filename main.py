@@ -132,26 +132,37 @@ def main():
     svc = gmail_service(creds)
     ws = sheets_client(creds)
 
-    existing = read_existing(ws)
     msgs = fetch_messages(svc)
+    print(f"[INFO] Mensajes que calzan con la query: {len(msgs)}")
     if not msgs:
         print("No hay correos que coincidan con la query.")
         return
+
+    existing = read_existing(ws)
+    print(f"[INFO] Filas existentes en Sheet: {len(existing)}")
 
     rows = []
     for m in msgs:
         msg = svc.users().messages().get(userId="me", id=m["id"]).execute()
         headers = {h["name"].lower(): h["value"] for h in msg["payload"].get("headers", [])}
-        fecha = parse_gmail_date(headers.get("date"))
         message_id = msg.get("id","")
-
+        fecha = parse_gmail_date(headers.get("date"))
         images = get_images_from_message(svc, "me", msg)
+        print(f"[INFO] Mensaje {message_id}: imágenes encontradas = {len(images)}")
+
         for origin, pil in images:
             pre = preprocess(pil)
+            items = parse_table(pre)
+            print(f"[INFO]   → {origin}: filas OCR detectadas = {len(items)}")
+            if not items:
+                # Muestra una muestra del OCR crudo para diagnosticar
+                sample = pytesseract.image_to_string(pre, lang="eng")[:400]
+                print("[DEBUG] OCR sample:\n" + sample)
+
             img_hash = hash_image(pre)
-            for it in parse_table(pre):
+            for it in items:
                 key = (message_id, str(it["sku"]), str(it["un_recibidas"]))
-                if key in existing: 
+                if key in existing:
                     continue
                 rows.append([fecha, str(it["sku"]), str(it["un_recibidas"]), message_id, img_hash, origin])
 
@@ -161,5 +172,3 @@ def main():
     else:
         print("No hay filas nuevas para agregar.")
 
-if __name__ == "__main__":
-    main()
