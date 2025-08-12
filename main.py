@@ -48,10 +48,17 @@ def sheets_client(creds):
 # ───────────────────────────────────────────────────────────────────────────────
 def preprocess(pil_img: Image.Image) -> Image.Image:
     img = np.array(pil_img.convert("L"))
-    img = cv2.resize(img, None, fx=2.0, fy=2.0, interpolation=cv2.INTER_CUBIC)
+    # subir más la resolución para imágenes pequeñas
+    img = cv2.resize(img, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
     img = cv2.medianBlur(img, 3)
-    _, img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    # binarización adaptativa + Otsu como fallback
+    try:
+        img = cv2.adaptiveThreshold(img, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                    cv2.THRESH_BINARY, 31, 5)
+    except Exception:
+        _, img = cv2.threshold(img, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
     return Image.fromarray(img)
+
 
 def ocr_rows(pil_img):
     df = pytesseract.image_to_data(pil_img, lang="eng", output_type=pytesseract.Output.DATAFRAME)
@@ -68,19 +75,49 @@ def ocr_rows(pil_img):
     return rows
 
 def parse_table(pil_img):
-    """Heurística: SKU = 10–16 dígitos; UN RECIBIDAS = último entero de la línea."""
+    """
+    Heurística:
+    - SKU = 10–16 dígitos
+    - UN RECIBIDAS = último entero de la línea
+    Primero intentamos con image_to_data (filas confiables). Si no encuentra, fallback
+    a image_to_string por líneas.
+    """
     out = []
-    for g, text in ocr_rows(pil_img):
-        m_sku = re.search(r"\b(\d{10,16})\b", text.replace(" ", ""))
+
+    # --- Método 1: usando filas de image_to_data ---
+    rows = ocr_rows(pil_img)
+    for g, text in rows:
+        m_sku = re.search(r"(\d{10,16})", text.replace(" ", ""))
         if not m_sku:
             continue
         sku = m_sku.group(1)
-        nums = re.findall(r"\b\d+\b", text)
+        nums = re.findall(r"\d+", text)
         if not nums:
             continue
         un_recibidas = int(nums[-1])
         out.append({"sku": sku, "un_recibidas": un_recibidas})
+
+    if out:
+        return out
+
+    # --- Método 2 (fallback): parseo línea por línea desde image_to_string ---
+    raw = pytesseract.image_to_string(pil_img, lang="eng")
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        m_sku = re.search(r"(\d{10,16})", line.replace(" ", ""))
+        if not m_sku:
+            continue
+        sku = m_sku.group(1)
+        nums = re.findall(r"\d+", line)
+        if not nums:
+            continue
+        un_recibidas = int(nums[-1])
+        out.append({"sku": sku, "un_recibidas": un_recibidas})
+
     return out
+
 
 def hash_image(pil_img):
     buf = io.BytesIO()
