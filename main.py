@@ -20,7 +20,7 @@ SCOPES = [
 GMAIL_QUERY = os.environ["GMAIL_QUERY"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 
-print("[BOOT] main.py v3 arrancando...")
+print("[BOOT] main.py v4 arrancando...")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -47,11 +47,21 @@ def sheets_client(creds):
     print(f"[SHEET] Using ID: {sid}")
     sh = gc.open_by_key(sid)
     print(f"[SHEET] Abierto: {sh.title}")
+
+    tabs = [ws.title for ws in sh.worksheets()]
+    print(f"[SHEET] Pestañas disponibles: {tabs}")
+
+    # Acepta ambos nombres (con y sin la p extra)
+    preferred = "OCR Recepciones"
+    alt = "OCR Recepeciones"  # con 'p' extra
+    target = preferred if preferred in tabs else (alt if alt in tabs else preferred)
+
     try:
-        ws = sh.worksheet("OCR Recepciones")
+        ws = sh.worksheet(target)
     except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title="OCR Recepciones", rows=1000, cols=10)
+        ws = sh.add_worksheet(title=preferred, rows=1000, cols=10)
         ws.append_row(["fecha_correo","sku","un_recibidas","message_id","img_hash","origen"])
+        print(f"[SHEET] Creada pestaña nueva: {preferred}")
     return ws
 
 # ───────────────────────────────────────────────────────────────────────────────
@@ -209,7 +219,7 @@ def main():
     creds = load_creds()
     svc = gmail_service(creds)
 
-    # Muestra con qué cuenta estás autenticado (para permisos del Sheet)
+    # Muestra con qué cuenta estás autenticado
     profile = svc.users().getProfile(userId="me").execute()
     print(f"[AUTH] Gmail como: {profile.get('emailAddress')}")
 
