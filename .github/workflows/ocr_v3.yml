@@ -1,15 +1,15 @@
-    name: OCR Recepciones (v3)
+name: OCR Recepciones (v3)
 
-    on:
-    workflow_dispatch: {}
-    schedule:
-    - cron: "15 12 * * *"
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: "15 12 * * *"   # 12:15 UTC (~08:15 Chile)
 
-    jobs:
-    run:
+jobs:
+  run:
     runs-on: ubuntu-latest
 
-    
+    # Variables de entorno disponibles para TODOS los steps del job
     env:
       OCR_LANG: spa+eng
       GMAIL_QUERY: ${{ secrets.GMAIL_QUERY }}
@@ -20,22 +20,24 @@
 
     steps:
       - uses: actions/checkout@v4
+
       - name: Install system deps (tesseract)
         run: |
           sudo apt-get update
           sudo apt-get install -y tesseract-ocr tesseract-ocr-spa
           tesseract --version
+          echo "Idiomas instalados:"
           tesseract --list-langs
-      # ... resto de pasos ...
- 
-        echo "Idiomas instalados:"
-        tesseract --list-langs
-
 
       - name: Write credentials to files
         run: |
           printf "%s" "${GOOGLE_CREDENTIALS}" > credentials.json
           printf "%s" "${GOOGLE_TOKEN}" > token.json
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
 
       - name: Install Python deps
         run: |
