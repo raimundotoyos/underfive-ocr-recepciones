@@ -20,7 +20,10 @@ SCOPES = [
 GMAIL_QUERY = os.environ["GMAIL_QUERY"]
 SPREADSHEET_ID = os.environ["SPREADSHEET_ID"]
 
-print("[BOOT] main.py v5 arrancando... [MARK]=UF-8421")
+# Idioma OCR (por defecto español+inglés). Puedes setear OCR_LANG en el workflow.
+OCR_LANG = os.environ.get("OCR_LANG", "spa+eng")
+
+print("[BOOT] main.py v6 arrancando... [MARK]=UF-8421-COL")
 
 # ───────────────────────────────────────────────────────────────────────────────
 # Helpers
@@ -67,6 +70,7 @@ def sheets_client(creds):
 # OCR utils
 # ───────────────────────────────────────────────────────────────────────────────
 def preprocess(pil_img: Image.Image) -> Image.Image:
+    # Subimos escala + binarización para mejorar OCR
     img = np.array(pil_img.convert("L"))
     img = cv2.resize(img, None, fx=3.0, fy=3.0, interpolation=cv2.INTER_CUBIC)
     img = cv2.medianBlur(img, 3)
@@ -79,7 +83,9 @@ def preprocess(pil_img: Image.Image) -> Image.Image:
     return Image.fromarray(img)
 
 def ocr_rows(pil_img):
-    df = pytesseract.image_to_data(pil_img, lang="eng", output_type=pytesseract.Output.DATAFRAME)
+    df = pytesseract.image_to_data(
+        pil_img, lang=OCR_LANG, output_type=pytesseract.Output.DATAFRAME
+    )
     df = df.dropna(subset=["text"])
     if df.empty:
         return []
@@ -94,42 +100,70 @@ def ocr_rows(pil_img):
 
 def parse_table(pil_img):
     """
-    Heurística:
-    - SKU = 10–16 dígitos
-    - UN RECIBIDAS = último entero de la línea
-    Primero con image_to_data; si no encuentra, fallback a image_to_string por líneas.
+    Extrae SKU y UN RECIBIDAS usando columnas:
+      - Detecta span X de headers ENVIADAS/RECIBIDAS.
+      - UN RECIBIDAS = número cuyo centro X cae bajo el span de RECIBIDAS.
+      - Si hay headers pero no hay número en RECIBIDAS → asumimos 0.
+      - Fallback: si no hay headers, usa el número más a la derecha (comportamiento anterior).
     """
+    df = pytesseract.image_to_data(
+        pil_img, lang=OCR_LANG, output_type=pytesseract.Output.DATAFRAME
+    )
+    df = df.dropna(subset=["text"])
+    if df.empty:
+        return []
+
+    df["text"] = df["text"].astype(str).str.strip()
+    df = df[df["text"] != ""].copy()
+
+    # localizar headers aproximados
+    def find_col_span(pattern):
+        m = df[df["text"].str.contains(pattern, case=False, regex=True)]
+        if m.empty:
+            return None
+        r = m.sort_values(["conf", "width"], ascending=[False, False]).iloc[0]
+        x1 = int(r["left"])
+        x2 = x1 + int(r["width"])
+        return (x1, x2)
+
+    span_env = find_col_span(r"ENVIAD")   # ENVIADAS
+    span_rec = find_col_span(r"RECIB")    # RECIBIDAS
+
     out = []
 
-    rows = ocr_rows(pil_img)
-    for g, text in rows:
-        m_sku = re.search(r"(\d{10,16})", text.replace(" ", ""))
+    for (b, p, l), g in df.groupby(["block_num","par_num","line_num"]):
+        g = g.sort_values("left")
+        line_txt = " ".join(g["text"].tolist())
+
+        # SKU = 10–16 dígitos
+        m_sku = re.search(r"(\d{10,16})", line_txt.replace(" ", ""))
         if not m_sku:
             continue
         sku = m_sku.group(1)
-        nums = re.findall(r"\d+", text)
-        if not nums:
-            continue
-        un_recibidas = int(nums[-1])
-        out.append({"sku": sku, "un_recibidas": un_recibidas})
 
-    if out:
-        return out
+        # tokens numéricos con su centro X
+        digits = g[g["text"].str.fullmatch(r"\d+")]
+        if digits.empty:
+            continue
+        digits = digits.assign(cx=digits["left"] + digits["width"]/2).sort_values("left")
 
-    raw = pytesseract.image_to_string(pil_img, lang="eng")
-    for line in raw.splitlines():
-        line = line.strip()
-        if not line:
-            continue
-        m_sku = re.search(r"(\d{10,16})", line.replace(" ", ""))
-        if not m_sku:
-            continue
-        sku = m_sku.group(1)
-        nums = re.findall(r"\d+", line)
-        if not nums:
-            continue
-        un_recibidas = int(nums[-1])
-        out.append({"sku": sku, "un_recibidas": un_recibidas})
+        rec = None
+
+        # Si tenemos columna RECIBIDAS detectada, buscamos número dentro del span
+        if span_rec:
+            in_rec = digits[(digits["cx"] >= span_rec[0]-5) & (digits["cx"] <= span_rec[1]+5)]
+            if not in_rec.empty:
+                rec = int(in_rec.iloc[-1]["text"])  # el más a la derecha dentro de la col
+
+        # Si detectamos headers pero no hay número bajo RECIBIDAS → asumimos 0
+        if rec is None and (span_rec or span_env):
+            rec = 0
+
+        # Fallback si no detectamos headers: usa el número más a la derecha
+        if rec is None:
+            rec = int(digits.iloc[-1]["text"])
+
+        out.append({"sku": sku, "un_recibidas": rec})
 
     return out
 
@@ -243,7 +277,7 @@ def main():
             items = parse_table(pre)
             print(f"[OCR] {origin}: filas detectadas = {len(items)}")
             if not items:
-                sample = pytesseract.image_to_string(pre, lang="eng")[:400]
+                sample = pytesseract.image_to_string(pre, lang=OCR_LANG)[:400]
                 print("[DEBUG] OCR sample >>>"); print(sample); print("<<< OCR sample end")
 
             img_hash = hash_image(pre)
