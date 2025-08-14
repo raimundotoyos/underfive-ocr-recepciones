@@ -307,5 +307,11 @@ def main():
 if __name__ == "__main__":
     import re
     main()
+- name: Upload screenshots (always)
+  if: always()
+  uses: actions/upload-artifact@v4
+  with:
+    name: playwright-screens
+    path: pw_screens/**
 
 
