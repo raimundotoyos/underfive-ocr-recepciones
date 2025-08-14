@@ -6,3 +6,5 @@ pandas
 pillow
 pytesseract
 opencv-python-headless
+playwright
+
