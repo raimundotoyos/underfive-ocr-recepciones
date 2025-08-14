@@ -116,13 +116,36 @@ def first_visible(page, selectors, timeout=3000):
     raise RuntimeError(f"Ningún selector visible: {selectors}")
 
 def click_import_button(page):
-    # 1) Intento directo
+    # 0) asegúrate de estar viendo el formulario
+    try:
+        page.locator('xpath=//*[@id="new_inventory_movement_group"]').scroll_into_view_if_needed()
+    except:
+        pass
+
+    # 1) Tu XPATH directo al <a>
+    try:
+        page.click('xpath=//*[@id="new_inventory_movement_group"]/div[1]/div[5]/div/a[1]', timeout=1500)
+        return True
+    except:
+        pass
+
+    # 2) Tu XPATH al <i> (icono) — algunos sitios adjuntan el handler al <i>
+    try:
+        page.click('xpath=//*[@id="new_inventory_movement_group"]/div[1]/div[5]/div/a[1]/i', timeout=1500)
+        return True
+    except:
+        pass
+
+    # 3) Búsqueda amplia (texto/aria/tooltip), por si cambia el DOM
     selectors = [
         'button[aria-label*="Importar" i]',
         'button[title*="Importar" i]',
         '[data-tooltip*="Importar" i]',
+        'button:has-text("Importar lista de movimientos")',
         'button:has-text("Importar lista")',
+        'a:has-text("Importar lista de movimientos")',
         'a:has-text("Importar lista")',
+        'text=/\\bImportar lista\\b/i',
         'text=/\\bImportar\\b/i',
     ]
     for sel in selectors:
@@ -131,7 +154,8 @@ def click_import_button(page):
             return True
         except:
             pass
-    # 2) Scroll por si está fuera de viewport
+
+    # 4) Scroll y reintento
     try:
         page.mouse.wheel(0, 2000)
         page.wait_for_timeout(400)
@@ -143,7 +167,8 @@ def click_import_button(page):
             return True
         except:
             pass
-    # 3) Menús "Más/Acciones"
+
+    # 5) Probar menús "Más/Acciones"
     for more in ['button:has-text("Acciones")','button:has-text("Más")','[aria-haspopup="menu"]','button:has-text("⋯")','button:has-text("...")']:
         try:
             page.locator(more).first.click(timeout=800)
@@ -155,7 +180,9 @@ def click_import_button(page):
                     pass
         except:
             continue
+
     return False
+
 
 # --------------------------- Build text block ---------------------
 def build_import_text(pending_rows: List[List[str]], price_map: Dict[str,float]):
@@ -237,17 +264,21 @@ def run_parrotfy_import(import_text: str):
         # Abrir Importar lista (tolerante + scroll + dump)
         opened = click_import_button(page)
         if not opened:
-            page.screenshot(path="pw_screens/04_no_modal.png", full_page=True)
-            try:
-                texts = page.locator("button, a, [role=button]").all_text_contents()
-                with open("pw_screens/04_controls.txt","w",encoding="utf-8") as f:
-                    f.write("\n".join([t.strip() for t in texts if t.strip()]))
-            except:
-                pass
-            raise RuntimeError("No pude abrir el modal 'Importar lista de movimientos'")
+        page.screenshot(path="pw_screens/04_no_modal.png", full_page=True)
+        try:
+        texts = page.locator("button, a, [role=button]").all_text_contents()
+        with open("pw_screens/04_controls.txt","w",encoding="utf-8") as f:
+            f.write("\n".join([t.strip() for t in texts if t.strip()]))
+        except:
+        pass
+        # si falla, usa el fallback manual si lo tienes activado
+        raise RuntimeError("No pude abrir el modal 'Importar lista de movimientos'")
 
+        # ✅ Espera explícita a que el modal sea visible
         dlg = page.get_by_role("dialog")
+        dlg.wait_for(state="visible", timeout=4000)
         page.screenshot(path="pw_screens/05_modal_open.png", full_page=True)
+
 
         # Pegar bloque
         try:
