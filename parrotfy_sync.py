@@ -44,7 +44,7 @@ def read_prices(ws_prices) -> Dict[str, float]:
     idx_price = header.index("precio") if "precio" in header else header.index("precios")
     price_map: Dict[str,float] = {}
     for r in rows[1:]:
-        if len(r) <= max(idx_sku, idx_price): 
+        if len(r) <= max(idx_sku, idx_price):
             continue
         sku = re.sub(r"\D", "", r[idx_sku])  # solo dígitos
         if not sku:
@@ -58,7 +58,7 @@ def read_prices(ws_prices) -> Dict[str, float]:
 
 def pick_rows(ws_data) -> Tuple[List[List[str]], List[int]]:
     rows = ws_data.get_all_values()
-    if not rows: 
+    if not rows:
         return [], []
     header = [h.strip().lower() for h in rows[0]]
     idx_sku  = header.index("sku")
@@ -68,7 +68,7 @@ def pick_rows(ws_data) -> Tuple[List[List[str]], List[int]]:
     pending = []
     row_indexes = []
     for i, r in enumerate(rows[1:], start=2):  # gspread 1-index; header = 1
-        if len(r) <= max(idx_sku, idx_unr): 
+        if len(r) <= max(idx_sku, idx_unr):
             continue
         if idx_flag is not None and len(r) > idx_flag and str(r[idx_flag]).strip():
             continue  # ya enviado
@@ -114,6 +114,48 @@ def first_visible(page, selectors, timeout=3000):
         except:
             continue
     raise RuntimeError(f"Ningún selector visible: {selectors}")
+
+def click_import_button(page):
+    # 1) Intento directo
+    selectors = [
+        'button[aria-label*="Importar" i]',
+        'button[title*="Importar" i]',
+        '[data-tooltip*="Importar" i]',
+        'button:has-text("Importar lista")',
+        'a:has-text("Importar lista")',
+        'text=/\\bImportar\\b/i',
+    ]
+    for sel in selectors:
+        try:
+            page.locator(sel).first.click(timeout=1200)
+            return True
+        except:
+            pass
+    # 2) Scroll por si está fuera de viewport
+    try:
+        page.mouse.wheel(0, 2000)
+        page.wait_for_timeout(400)
+    except:
+        pass
+    for sel in selectors:
+        try:
+            page.locator(sel).first.click(timeout=1200)
+            return True
+        except:
+            pass
+    # 3) Menús "Más/Acciones"
+    for more in ['button:has-text("Acciones")','button:has-text("Más")','[aria-haspopup="menu"]','button:has-text("⋯")','button:has-text("...")']:
+        try:
+            page.locator(more).first.click(timeout=800)
+            for sel in selectors:
+                try:
+                    page.locator(sel).first.click(timeout=800)
+                    return True
+                except:
+                    pass
+        except:
+            continue
+    return False
 
 # --------------------------- Build text block ---------------------
 def build_import_text(pending_rows: List[List[str]], price_map: Dict[str,float]):
@@ -175,6 +217,9 @@ def run_parrotfy_import(import_text: str):
         # Asegurar página target
         page.goto(f"{PARROTFY_URL}/inventory_movement_groups/new", wait_until="domcontentloaded")
         page.screenshot(path="pw_screens/02_new_page.png", full_page=True)
+        # Guardar HTML por si no aparece el botón
+        with open("pw_screens/02_new_page.html","w",encoding="utf-8") as f:
+            f.write(page.content())
 
         # Setear campos (tolerante)
         def try_select(label, text):
@@ -189,19 +234,16 @@ def run_parrotfy_import(import_text: str):
         try_select("Centro de negocio", "Marketing")
         page.screenshot(path="pw_screens/03_fields_set.png", full_page=True)
 
-        # Abrir Importar lista
-        opened = False
-        for sel in [
-            'button[aria-label="Importar lista de movimientos"]',
-            'button:has-text("Importar lista")',
-            'a:has-text("Importar lista")',
-            '[data-tooltip="Importar lista de movimientos"]',
-            'text=Importar lista de movimientos'
-        ]:
-            try: page.click(sel, timeout=1500); opened = True; break
-            except: continue
+        # Abrir Importar lista (tolerante + scroll + dump)
+        opened = click_import_button(page)
         if not opened:
             page.screenshot(path="pw_screens/04_no_modal.png", full_page=True)
+            try:
+                texts = page.locator("button, a, [role=button]").all_text_contents()
+                with open("pw_screens/04_controls.txt","w",encoding="utf-8") as f:
+                    f.write("\n".join([t.strip() for t in texts if t.strip()]))
+            except:
+                pass
             raise RuntimeError("No pude abrir el modal 'Importar lista de movimientos'")
 
         dlg = page.get_by_role("dialog")
