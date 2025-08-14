@@ -19,8 +19,8 @@ PARROTFY_PASS = os.environ["PARROTFY_PASS"]
 
 # --------------------------- Google helpers -----------------------
 SCOPES = [
-    "https://www.googleapis.com/auth/spreadsheets.readonly",
-    "https://www.googleapis.com/auth/spreadsheets"
+    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/spreadsheets",
 ]
 
 def load_creds() -> Credentials:
