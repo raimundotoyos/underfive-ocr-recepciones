@@ -1,35 +1,32 @@
 name: Parrotfy Sync
 
 on:
-  workflow_dispatch: {}   # lo ejecutas a mano cuando quieras
+  workflow_dispatch: {}
   # schedule:
-  #   - cron: "20 12 * * *"   # <-- si quieres programarlo diario (12:20 UTC)
+  #   - cron: "25 12 * * *"  # opcional
 
 jobs:
   run:
     runs-on: ubuntu-latest
     env:
-      PARROTFY_URL: ${{ secrets.PARROTFY_URL }}
+      PARROTFY_URL:  ${{ secrets.PARROTFY_URL }}
       PARROTFY_USER: ${{ secrets.PARROTFY_USER }}
       PARROTFY_PASS: ${{ secrets.PARROTFY_PASS }}
 
-      # Google
-      SPREADSHEET_ID: ${{ secrets.SPREADSHEET_ID }}
+      SPREADSHEET_ID:     ${{ secrets.SPREADSHEET_ID }}
       GOOGLE_CREDENTIALS: ${{ secrets.GOOGLE_CREDENTIALS }}
-      GOOGLE_TOKEN: ${{ secrets.GOOGLE_TOKEN }}
+      GOOGLE_TOKEN:       ${{ secrets.GOOGLE_TOKEN }}
 
-      # Nombres de pestañas/columnas
-      DATA_SHEET_NAME: "OCR Recepciones"
+      DATA_SHEET_NAME:   "OCR Recepciones"
       PRICES_SHEET_NAME: "Precios"
+      STRICT_PRICES:     "1"
 
-      # Modo estricto para precios
-      STRICT_PRICES: "1"
+      PYTHONUNBUFFERED: "1"
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
@@ -37,22 +34,16 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          python -m playwright install --with-deps
 
-      - name: Write Google creds
-        run: |
-          printf "%s" "${GOOGLE_CREDENTIALS}" > credentials.json
-          printf "%s" "${GOOGLE_TOKEN}" > token.json
+      - name: Install Playwright browsers
+        run: python -m playwright install --with-deps chromium
 
-      - name: Run Parrotfy Sync
-        run: |
-          python parrotfy_sync.py
+      - name: Run sync
+        run: python parrotfy_sync.py
 
-      - name: Upload screenshots on failure (debug)
-        if: failure()
+      - name: Upload screenshots (always)
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: playwright-screens
-          path: |
-            pw_screens/**
-            pw_traces/**
+          path: pw_screens/**
