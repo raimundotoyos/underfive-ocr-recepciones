@@ -264,20 +264,21 @@ def run_parrotfy_import(import_text: str):
         # Abrir Importar lista (tolerante + scroll + dump)
         opened = click_import_button(page)
         if not opened:
-        page.screenshot(path="pw_screens/04_no_modal.png", full_page=True)
-        try:
-        texts = page.locator("button, a, [role=button]").all_text_contents()
-        with open("pw_screens/04_controls.txt","w",encoding="utf-8") as f:
-            f.write("\n".join([t.strip() for t in texts if t.strip()]))
-        except:
-        pass
-        # si falla, usa el fallback manual si lo tienes activado
-        raise RuntimeError("No pude abrir el modal 'Importar lista de movimientos'")
+             page.screenshot(path="pw_screens/04_no_modal.png", full_page=True)
+             try:
+                 texts = page.locator("button, a, [role=button]").all_text_contents()
+                 with open("pw_screens/04_controls.txt","w",encoding="utf-8") as f:
+                     f.write("\n".join([t.strip() for t in texts if t.strip()]))
+             except:
+                 pass
+            # si falla, abortamos (tienes el dump para ajustar selector)
+            raise RuntimeError("No pude abrir el modal 'Importar lista de movimientos'")
 
-        # ✅ Espera explícita a que el modal sea visible
-        dlg = page.get_by_role("dialog")
-        dlg.wait_for(state="visible", timeout=4000)
-        page.screenshot(path="pw_screens/05_modal_open.png", full_page=True)
+# ✅ Espera explícita a que el modal sea visible
+dlg = page.get_by_role("dialog")
+dlg.wait_for(state="visible", timeout=4000)
+page.screenshot(path="pw_screens/05_modal_open.png", full_page=True)
+
 
 
         # Pegar bloque
