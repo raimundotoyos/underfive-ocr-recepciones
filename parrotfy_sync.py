@@ -7,7 +7,7 @@ import gspread
 from google.oauth2.credentials import Credentials
 from playwright.sync_api import sync_playwright
 
-# --------------------------- Config/env ---------------------------
+# ---------- Config/env ----------
 SPREADSHEET_ID   = os.environ["SPREADSHEET_ID"]
 DATA_SHEET_NAME  = os.environ.get("DATA_SHEET_NAME", "OCR Recepciones")
 PRICES_SHEET     = os.environ.get("PRICES_SHEET_NAME", "Precios")
@@ -17,9 +17,9 @@ PARROTFY_URL  = os.environ["PARROTFY_URL"].rstrip("/")
 PARROTFY_USER = os.environ["PARROTFY_USER"]
 PARROTFY_PASS = os.environ["PARROTFY_PASS"]
 
-# --------------------------- Google helpers -----------------------
+# ---------- Google helpers ----------
 SCOPES = [
-    "https://www.googleapis.com/auth/gmail.readonly",
+    "https://www.googleapis.com/auth/spreadsheets.readonly",
     "https://www.googleapis.com/auth/spreadsheets",
 ]
 
@@ -31,7 +31,7 @@ def open_sheet():
     creds = load_creds()
     gc = gspread.authorize(creds)
     sh = gc.open_by_key(SPREADSHEET_ID)
-    ws_data = sh.worksheet(DATA_SHEET_NAME)
+    ws_data   = sh.worksheet(DATA_SHEET_NAME)
     ws_prices = sh.worksheet(PRICES_SHEET)
     return sh, ws_data, ws_prices
 
@@ -46,7 +46,7 @@ def read_prices(ws_prices) -> Dict[str, float]:
     for r in rows[1:]:
         if len(r) <= max(idx_sku, idx_price):
             continue
-        sku = re.sub(r"\D", "", r[idx_sku])  # solo dígitos
+        sku = re.sub(r"\D", "", r[idx_sku])
         if not sku:
             continue
         try:
@@ -61,18 +61,18 @@ def pick_rows(ws_data) -> Tuple[List[List[str]], List[int]]:
     if not rows:
         return [], []
     header = [h.strip().lower() for h in rows[0]]
-    idx_sku = header.index("sku")
-    idx_unr = header.index("un_recibidas")
+    idx_sku  = header.index("sku")
+    idx_unr  = header.index("un_recibidas")
     idx_flag = header.index("parrotfy_enviado") if "parrotfy_enviado" in header else None
 
     pending: List[List[str]] = []
     row_indexes: List[int] = []
-    for i, r in enumerate(rows[1:], start=2):  # gspread es 1-index; header = 1
+    for i, r in enumerate(rows[1:], start=2):  # gspread 1-index; header es fila 1
         if len(r) <= max(idx_sku, idx_unr):
             continue
         if idx_flag is not None and len(r) > idx_flag and str(r[idx_flag]).strip():
-            continue  # ya enviado
-        sku = re.sub(r"\D", "", r[idx_sku])  # solo dígitos
+            continue
+        sku = re.sub(r"\D", "", r[idx_sku])
         if not sku:
             continue
         try:
@@ -96,15 +96,10 @@ def mark_sent(ws_data, row_indexes: List[int]):
         col = header.index("parrotfy_enviado") + 1
 
     ts = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-    updates = []
-    for r in row_indexes:
-        updates.append({
-            "range": gspread.utils.rowcol_to_a1(r, col),
-            "values": [[ts]]
-        })
+    updates = [{"range": gspread.utils.rowcol_to_a1(r, col), "values": [[ts]]} for r in row_indexes]
     ws_data.batch_update(updates, value_input_option="RAW")
 
-# --------------------------- Playwright helpers -------------------
+# ---------- Playwright helpers ----------
 def first_visible(page, selectors, timeout=3000):
     for sel in selectors:
         try:
@@ -116,27 +111,39 @@ def first_visible(page, selectors, timeout=3000):
     raise RuntimeError(f"Ningún selector visible: {selectors}")
 
 def click_import_button(page):
-    # 0) Asegurar formulario a la vista
+    # Asegurar el formulario a la vista
     try:
         page.locator('xpath=//*[@id="new_inventory_movement_group"]').scroll_into_view_if_needed()
     except:
         pass
 
-    # 1) Tu XPATH directo al <a>
+    # 1) Tu XPath al <a>
     try:
         page.click('xpath=//*[@id="new_inventory_movement_group"]/div[1]/div[5]/div/a[1]', timeout=1500)
         return True
     except:
         pass
-
-    # 2) Tu XPATH al <i> (icono)
+    # 2) Tu XPath al <i>
     try:
         page.click('xpath=//*[@id="new_inventory_movement_group"]/div[1]/div[5]/div/a[1]/i', timeout=1500)
         return True
     except:
         pass
-
-    # 3) Búsqueda amplia (texto/aria/tooltip)
+    # 3) Evaluación JS: buscar cualquier <a>/<button> con texto "Importar lista"
+    try:
+        clicked = page.evaluate("""
+            (() => {
+              const els = Array.from(document.querySelectorAll('a,button,[role=button]'));
+              const el = els.find(e => /importar lista/i.test(e.textContent || ''));
+              if (el) { el.click(); return true; }
+              return false;
+            })();
+        """)
+        if clicked:
+            return True
+    except:
+        pass
+    # 4) Genéricos + scroll + menús
     selectors = [
         'button[aria-label*="Importar" i]',
         'button[title*="Importar" i]',
@@ -154,11 +161,8 @@ def click_import_button(page):
             return True
         except:
             pass
-
-    # 4) Scroll y reintento
     try:
-        page.mouse.wheel(0, 2000)
-        page.wait_for_timeout(400)
+        page.mouse.wheel(0, 2000); page.wait_for_timeout(400)
     except:
         pass
     for sel in selectors:
@@ -167,9 +171,7 @@ def click_import_button(page):
             return True
         except:
             pass
-
-    # 5) Probar menús "Más/Acciones"
-    for more in ['button:has-text("Acciones")', 'button:has-text("Más")', '[aria-haspopup="menu"]', 'button:has-text("⋯")', 'button:has-text("...")']:
+    for more in ['button:has-text("Acciones")','button:has-text("Más")','[aria-haspopup="menu"]','button:has-text("⋯")','button:has-text("...")']:
         try:
             page.locator(more).first.click(timeout=800)
             for sel in selectors:
@@ -180,12 +182,11 @@ def click_import_button(page):
                     pass
         except:
             continue
-
     return False
 
-# --------------------------- Build text block ---------------------
+# ---------- Construir bloque a pegar ----------
 def build_import_text(pending_rows: List[List[str]], price_map: Dict[str, float]):
-    lines, missing = [], []
+    lines, missing, triples = [], [], []
     for sku, qty in pending_rows:
         price = price_map.get(sku)
         if price is None:
@@ -195,10 +196,58 @@ def build_import_text(pending_rows: List[List[str]], price_map: Dict[str, float]
             price = 0.0
         price_str = str(int(price)) if float(price).is_integer() else str(price)
         lines.append(f"{sku}\t{qty}\t{price_str}")
-    return "\n".join(lines), missing
+        triples.append((sku, qty, price_str))
+    return "\n".join(lines), missing, triples
 
-# --------------------------- Parrotfy flow ------------------------
-def run_parrotfy_import(import_text: str):
+# ---------- Fallback manual (sin modal) ----------
+def manual_add_rows(page, triples):
+    def find_input(candidates, to=None):
+        return first_visible(page, candidates, timeout=to or 2500)
+
+    for (sku, qty, price) in triples:
+        # Producto
+        prod = find_input([
+            'input[role="combobox"]',
+            'input[placeholder*="Producto" i]',
+            'input[name*="product" i]',
+            '[aria-label*="Producto" i]',
+            '//label[contains(., "Producto")]/following::input[1]',
+        ])
+        prod.click(); prod.fill(sku); page.keyboard.press("Enter")
+
+        # Cantidad
+        qty_in = find_input([
+            'input[name*="cantidad" i]',
+            'input[name*="quantity" i]',
+            'input[placeholder*="Cantidad" i]',
+            'input[type="number"]',
+            '//label[contains(., "Cantidad")]/following::input[1]',
+        ])
+        qty_in.click(); qty_in.fill(str(qty))
+
+        # Precio
+        price_in = find_input([
+            'input[name*="precio" i]',
+            'input[name*="valor" i]',
+            'input[placeholder*="Precio" i]',
+            'input[placeholder*="Valor" i]',
+            '//label[contains(., "Precio") or contains(., "Valor")]/following::input[1]',
+        ])
+        price_in.click(); price_in.fill(str(price))
+
+        # Confirmar fila
+        try:
+            page.keyboard.press("Enter")
+        except:
+            for add_sel in ['button:has-text("Agregar")','button:has-text("Añadir")','button:has-text("+")']:
+                try:
+                    page.locator(add_sel).first.click(timeout=800); break
+                except:
+                    continue
+        page.wait_for_timeout(250)
+
+# ---------- Flujo Parrotfy ----------
+def run_parrotfy_import(import_text: str, triples=None):
     from pathlib import Path
     Path("pw_screens").mkdir(exist_ok=True, parents=True)
 
@@ -207,51 +256,48 @@ def run_parrotfy_import(import_text: str):
         ctx = browser.new_context()
         page = ctx.new_page()
 
-        # Ir directo (si no hay sesión, redirige a login)
+        # Ir directo (redirige a login si no hay sesión)
         page.goto(f"{PARROTFY_URL}/inventory_movement_groups/new", wait_until="domcontentloaded")
         page.screenshot(path="pw_screens/00_initial.png", full_page=True)
 
-        # Login (tolerante)
+        # Login tolerante
         try:
             email_input = first_visible(page, [
-                'input[name="user[email]"]', 'input[type="email"]', 'input[name*="email" i]',
-                '[placeholder*="mail" i]', '//input[@type="email"]',
+                'input[name="user[email]"]','input[type="email"]','input[name*="email" i]',
+                '[placeholder*="mail" i]','//input[@type="email"]',
                 '//label[contains(., "Email") or contains(., "Correo")]/following::input[1]',
+                'input[name$="[email]"]',
             ], timeout=2000)
 
-            for btn in ['button:has-text("Aceptar")', 'button:has-text("Accept")', 'text=Aceptar']:
-                try:
-                    page.click(btn, timeout=1000)
-                    break
-                except:
-                    pass
+            for btn in ['button:has-text("Aceptar")','button:has-text("Accept")','text=Aceptar']:
+                try: page.click(btn, timeout=1000); break
+                except: pass
 
             email_input.fill(PARROTFY_USER)
             password_input = first_visible(page, [
-                'input[name="user[password]"]', 'input[type="password"]', '//input[@type="password"]',
+                'input[name="user[password]"]','input[type="password"]','//input[@type="password"]',
                 '//label[contains(., "Contraseña") or contains(., "Password")]/following::input[1]',
+                'input[name$="[password]"]',
             ])
             password_input.fill(PARROTFY_PASS)
 
             first_visible(page, [
-                'button[type="submit"]', 'input[type="submit"]',
-                'button:has-text("Iniciar")', 'button:has-text("Entrar")', 'button:has-text("Sign in")',
+                'button[type="submit"]','input[type="submit"]',
+                'button:has-text("Iniciar")','button:has-text("Entrar")','button:has-text("Sign in")',
             ]).click()
 
             page.wait_for_load_state("networkidle")
             page.screenshot(path="pw_screens/01_after_login.png", full_page=True)
         except:
-            # puede que ya esté logueado
             page.screenshot(path="pw_screens/01_no_login.png", full_page=True)
 
         # Asegurar página target
         page.goto(f"{PARROTFY_URL}/inventory_movement_groups/new", wait_until="domcontentloaded")
         page.screenshot(path="pw_screens/02_new_page.png", full_page=True)
-        # Guardar HTML por si no aparece el botón
-        with open("pw_screens/02_new_page.html", "w", encoding="utf-8") as f:
+        with open("pw_screens/02_new_page.html","w",encoding="utf-8") as f:
             f.write(page.content())
 
-        # Setear campos (tolerante)
+        # Campos fijos
         def try_select(label, text):
             try:
                 page.get_by_label(label).click()
@@ -259,51 +305,58 @@ def run_parrotfy_import(import_text: str):
                 page.keyboard.press("Enter")
             except:
                 pass
-
         try_select("Referencia", "Otro")
         try_select("Bodega", "KW")
         try_select("Centro de negocio", "Marketing")
         page.screenshot(path="pw_screens/03_fields_set.png", full_page=True)
 
-        # Abrir Importar lista (tolerante + scroll + dump)
+        # Intentar abrir Importar lista
         opened = click_import_button(page)
-        if not opened:
-            page.screenshot(path="pw_screens/04_no_modal.png", full_page=True)
+        if opened:
+            # Esperar modal: role=dialog, aria-modal, o clases típicas
+            dlg = None
+            for sel in ['role=dialog', 'div[role="dialog"]', '[aria-modal="true"]', '.modal.show', '.modal[open]']:
+                try:
+                    dlg = page.locator(sel).first
+                    dlg.wait_for(state="visible", timeout=4000)
+                    break
+                except:
+                    continue
+            if dlg is None:
+                page.screenshot(path="pw_screens/04_no_modal.png", full_page=True)
+                raise RuntimeError("Se hizo click en Importar, pero no apareció el modal.")
+
+            page.screenshot(path="pw_screens/05_modal_open.png", full_page=True)
+            # Pegar bloque
+            try:
+                area = dlg.locator("textarea").first
+                area.click(); area.fill(import_text)
+            except:
+                ce = dlg.locator("[contenteditable=true]").first
+                ce.click(); ce.type(import_text)
+            dlg.get_by_role("button", name=re.compile("importar", re.I)).click()
+            page.screenshot(path="pw_screens/06_after_import.png", full_page=True)
+        else:
+            # Dump de controles y fallback manual
             try:
                 texts = page.locator("button, a, [role=button]").all_text_contents()
-                with open("pw_screens/04_controls.txt", "w", encoding="utf-8") as f:
+                with open("pw_screens/04_controls.txt","w",encoding="utf-8") as f:
                     f.write("\n".join([t.strip() for t in texts if t.strip()]))
             except:
                 pass
-            raise RuntimeError("No pude abrir el modal 'Importar lista de movimientos'")
-
-        # Espera explícita a que el modal sea visible
-        dlg = page.get_by_role("dialog")
-        dlg.wait_for(state="visible", timeout=4000)
-        page.screenshot(path="pw_screens/05_modal_open.png", full_page=True)
-
-        # Pegar bloque
-        try:
-            area = dlg.locator("textarea").first
-            area.click()
-            area.fill(import_text)
-        except:
-            ce = dlg.locator("[contenteditable=true]").first
-            ce.click()
-            ce.type(import_text)
-
-        dlg.get_by_role("button", name=re.compile("importar", re.I)).click()
-        page.screenshot(path="pw_screens/06_after_import.png", full_page=True)
+            if not triples:
+                raise RuntimeError("No hallé el botón 'Importar lista' y no tengo datos para fallback manual.")
+            manual_add_rows(page, triples)
+            page.screenshot(path="pw_screens/06_after_manual.png", full_page=True)
 
         # Crear
-        first_visible(page, ['button:has-text("CREAR")', 'button:has-text("Crear")']).click()
+        first_visible(page, ['button:has-text("CREAR")','button:has-text("Crear")']).click()
         page.wait_for_load_state("networkidle")
         page.screenshot(path="pw_screens/07_after_create.png", full_page=True)
 
-        ctx.close()
-        browser.close()
+        ctx.close(); browser.close()
 
-# --------------------------- Main ---------------------------------
+# ---------- Main ----------
 def main():
     print("[SYNC] Abriendo Google Sheet...")
     _, ws_data, ws_prices = open_sheet()
@@ -314,26 +367,21 @@ def main():
     print("[SYNC] Leyendo filas pendientes...")
     pending_rows, row_ids = pick_rows(ws_data)
     print(f"[SYNC] Filas con un_recibidas>0 y no enviadas: {len(pending_rows)}")
-
     if not pending_rows:
-        print("[SYNC] Nada que enviar. Fin.")
-        return
+        print("[SYNC] Nada que enviar. Fin."); return
 
-    import_text, missing = build_import_text(pending_rows, price_map)
+    import_text, missing, triples = build_import_text(pending_rows, price_map)
     if missing:
         print(f"[SYNC] Falta precio para {len(missing)} SKU(s). STRICT={STRICT_PRICES}")
-        for s in missing[:20]:
-            print("   -", s)
+        for s in missing[:20]: print("   -", s)
         if STRICT_PRICES and not import_text.strip():
-            print("[SYNC] No quedó ninguna fila válida. Fin.")
-            return
+            print("[SYNC] No quedó ninguna fila válida. Fin."); return
 
     print("[SYNC] Abriendo Parrotfy e importando...")
-    run_parrotfy_import(import_text)
+    run_parrotfy_import(import_text, triples=triples)
 
     print("[SYNC] Marcando filas como enviadas...")
     mark_sent(ws_data, row_ids)
-
     print("✅ Listo.")
 
 if __name__ == "__main__":
