@@ -34,6 +34,19 @@ def normalize_spreadsheet_id(val: str) -> str:
     m = re.search(r"/d/([a-zA-Z0-9-_]+)", val)
     return m.group(1) if m else val
 
+def clean_sku(raw) -> str:
+    """
+    Limpia el SKU para que no quede con apóstrofo ni caracteres no numéricos.
+    - Quita un apóstrofo inicial si viene pegado (p.ej. '1780...).
+    - Deja solo dígitos.
+    """
+    if raw is None:
+        return ""
+    s = str(raw).strip()
+    s = s.lstrip("'")                 # quita apóstrofo inicial
+    s = re.sub(r"\D", "", s)          # solo dígitos
+    return s
+
 # ───────────────────────────────────────────────────────────────────────────────
 # Auth / Services
 # ───────────────────────────────────────────────────────────────────────────────
@@ -228,7 +241,10 @@ def read_existing(ws):
     for r in values[1:]:
         if len(r) < len(header):
             continue
-        existing.add((r[idx["message_id"]], r[idx["sku"]], r[idx["un_recibidas"]]))
+        # normalizamos el SKU para evitar duplicados por apóstrofos/formato
+        sku_norm = clean_sku(r[idx["sku"]]) if "sku" in idx else ""
+        un_rec = r[idx["un_recibidas"]] if "un_recibidas" in idx else ""
+        existing.add((r[idx["message_id"]], sku_norm, un_rec))
     return existing
 
 def parse_gmail_date(date_str):
@@ -282,10 +298,14 @@ def main():
 
             img_hash = hash_image(pre)
             for it in items:
-                key = (message_id, str(it["sku"]), str(it["un_recibidas"]))
+                sku_clean = clean_sku(it.get("sku"))
+                if not sku_clean:
+                    continue  # si quedó vacío, saltamos
+                un_rec = str(it.get("un_recibidas", "")).strip()
+                key = (message_id, sku_clean, un_rec)
                 if key in existing:
                     continue
-                rows.append([fecha, str(it["sku"]), str(it["un_recibidas"]), message_id, img_hash, origin])
+                rows.append([fecha, sku_clean, un_rec, message_id, img_hash, origin])
 
     print(f"[INFO] Total filas a agregar: {len(rows)}")
     for r in rows:
